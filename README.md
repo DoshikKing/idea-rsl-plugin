@@ -12,6 +12,8 @@
 
 ## Сборка и установка
 
+Готовый ZIP можно скачать в разделе [Releases](https://github.com/DoshikKing/idea-rsl-plugin/releases/latest).
+
 Требуется JDK 21. Выполните:
 
 ```sh
