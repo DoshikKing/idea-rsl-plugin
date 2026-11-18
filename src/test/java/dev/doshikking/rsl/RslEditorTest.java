@@ -1,6 +1,7 @@
 package dev.doshikking.rsl;
 
 import com.intellij.codeInsight.TargetElementUtil;
+import com.intellij.openapi.actionSystem.IdeActions;
 import com.intellij.lang.annotation.HighlightSeverity;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.fileTypes.SyntaxHighlighterFactory;
@@ -38,6 +39,39 @@ public final class RslEditorTest extends BasePlatformTestCase {
 
         myFixture.configureByText("valid.mac", "macro run()\nvar amount = 1;\namount = 2\nend");
         assertEmpty(myFixture.doHighlighting(HighlightSeverity.ERROR));
+    }
+
+    public void testDiagnosticsRefreshAfterEdits() {
+        myFixture.configureByText("editing.mac", "var amount = 1<caret>;\namount = 2;");
+        assertEmpty(myFixture.doHighlighting(HighlightSeverity.ERROR));
+
+        myFixture.performEditorAction(IdeActions.ACTION_EDITOR_DELETE);
+        var errors = myFixture.doHighlighting(HighlightSeverity.ERROR);
+        assertEquals(errors.toString(), 1, errors.size());
+        assertEquals("Ожидается «;» между инструкциями", errors.getFirst().getDescription());
+
+        myFixture.type(';');
+        assertEmpty(myFixture.doHighlighting(HighlightSeverity.ERROR));
+    }
+
+    public void testStructuralDiagnosticsInEditor() {
+        myFixture.configureByText("structure.mac", """
+                macro run()
+                  if ()
+                    print(1 2);
+                  else
+                    print(3);
+                  elif (false)
+                    print(4);
+                  end
+                """);
+        var descriptions = myFixture.doHighlighting(HighlightSeverity.ERROR).stream()
+                .map(info -> info.getDescription()).toList();
+        assertEquals(4, descriptions.size());
+        assertTrue(descriptions.toString(), descriptions.stream().anyMatch(text -> text.contains("выражение в условии")));
+        assertTrue(descriptions.toString(), descriptions.stream().anyMatch(text -> text.contains("списка аргументов")));
+        assertTrue(descriptions.toString(), descriptions.stream().anyMatch(text -> text.contains("перед «else»")));
+        assertTrue(descriptions.toString(), descriptions.stream().anyMatch(text -> text.contains("«macro» не закрыт")));
     }
 
     public void testIndexedAssignment() {

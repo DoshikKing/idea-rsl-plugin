@@ -1,35 +1,47 @@
 package dev.doshikking.rsl;
 
 import com.intellij.lang.annotation.AnnotationHolder;
-import com.intellij.lang.annotation.Annotator;
+import com.intellij.lang.annotation.ExternalAnnotator;
 import com.intellij.lang.annotation.HighlightSeverity;
 import com.intellij.openapi.editor.colors.CodeInsightColors;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
+import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.util.TextRange;
-import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
-import com.intellij.ui.JBColor;
-import java.awt.Color;
 import org.jetbrains.annotations.NotNull;
 
-public final class RslAnnotator implements Annotator {
+import java.util.List;
+
+public final class RslAnnotator extends ExternalAnnotator<String, List<RslAnalysis.Problem>> implements DumbAware {
     @Override
-    public void annotate(@NotNull PsiElement element, @NotNull AnnotationHolder holder) {
-        if (!(element instanceof PsiFile file)) return;
-        var problems = RslIdentifier.analysis(file).problems();
+    public @NotNull String collectInformation(@NotNull PsiFile file) {
+        return file.getText();
+    }
+
+    @Override
+    public @NotNull List<RslAnalysis.Problem> doAnnotate(String source) {
+        return RslAnalysis.analyze(source);
+    }
+
+    @Override
+    public void apply(@NotNull PsiFile file, List<RslAnalysis.Problem> problems, @NotNull AnnotationHolder holder) {
         if (problems.isEmpty()) return;
 
         var scheme = EditorColorsManager.getInstance().getGlobalScheme();
-        var attributes = scheme.getAttributes(CodeInsightColors.ERRORS_ATTRIBUTES).clone();
-        Color foreground = scheme.getAttributes(CodeInsightColors.WRONG_REFERENCES_ATTRIBUTES).getForegroundColor();
-        if (foreground == null) foreground = attributes.getEffectColor();
-        attributes.setForegroundColor(foreground != null ? foreground : JBColor.RED);
+        var underline = scheme.getAttributes(CodeInsightColors.ERRORS_ATTRIBUTES);
+        var referenceStyle = scheme.getAttributes(CodeInsightColors.WRONG_REFERENCES_ATTRIBUTES);
+        var attributes = underline == null ? null : underline.clone();
+        if (attributes != null) {
+            var foreground = referenceStyle != null ? referenceStyle.getForegroundColor() : null;
+            if (foreground == null) foreground = attributes.getEffectColor();
+            attributes.setForegroundColor(foreground);
+        }
 
         for (RslAnalysis.Problem problem : problems) {
-            holder.newAnnotation(HighlightSeverity.ERROR, problem.message())
-                    .range(new TextRange(problem.start(), problem.end()))
-                    .enforcedTextAttributes(attributes)
-                    .create();
+            var annotation = holder.newAnnotation(HighlightSeverity.ERROR, problem.message())
+                    .range(new TextRange(problem.start(), problem.end()));
+            if (attributes != null) annotation.enforcedTextAttributes(attributes);
+            annotation.create();
         }
     }
 }

@@ -76,7 +76,7 @@ final class RslAnalysis {
     static Result inspect(CharSequence source) {
         var analysis = new RslAnalysis(source);
         analysis.body();
-        if (analysis.takeWord("onerror")) analysis.handler();
+        analysis.handlers();
         while (analysis.atWord("elif") || analysis.atWord("else") || analysis.atWord("onerror")) {
             Token branch = analysis.advance();
             analysis.report(branch, "«" + branch.text() + "» вне подходящего блока");
@@ -104,17 +104,30 @@ final class RslAnalysis {
             int start = position;
             try {
                 if (take(Kind.SEMICOLON)) continue;
+                if (unmatchedCloser()) {
+                    Token closer = advance();
+                    report(closer, "Лишняя закрывающая скобка «" + closer.text() + "»");
+                    continue;
+                }
                 statement();
-                if (!at(Kind.EOF) && !at(Kind.SEMICOLON) && !blockEnd()) {
+                if (!at(Kind.EOF) && !at(Kind.SEMICOLON) && !blockEnd() && !unmatchedCloser()) {
                     report(current(), "Ожидается «;» между инструкциями");
                 }
             } catch (ParseFailure ignored) {
                 if (position == start) advance();
-                while (!at(Kind.EOF) && !at(Kind.SEMICOLON) && !blockEnd() && !current().lineBreakBefore()) {
-                    advance();
-                }
+                recoverStatement();
             }
         }
+    }
+
+    private void recoverStatement() {
+        while (!at(Kind.EOF) && !at(Kind.SEMICOLON) && !blockEnd() && !current().lineBreakBefore()) {
+            advance();
+        }
+    }
+
+    private boolean unmatchedCloser() {
+        return at(Kind.RPAREN) || at(Kind.RBRACKET);
     }
 
     private void statement() {
@@ -177,52 +190,48 @@ final class RslAnalysis {
     }
 
     private void definition(Token start, String word, boolean local) {
-        if (word.equals("class") && take(Kind.LPAREN)) {
-            name();
-            require(Kind.RPAREN, "Ожидается «)» после имени базового класса");
-        }
-        declare(name(), false, local);
         Scope parent = scope;
-        scope = new Scope(parent);
         try {
-            if (take(Kind.LPAREN)) {
-                if (!at(Kind.RPAREN)) {
-                    do {
-                        declare(name(), false, false);
-                        type();
-                    } while (take(Kind.COMMA));
+            try {
+                if (word.equals("class") && take(Kind.LPAREN)) {
+                    name();
+                    require(Kind.RPAREN, "Ожидается «)» после имени базового класса");
                 }
-                require(Kind.RPAREN, "Ожидается «)» после списка параметров");
+                if (!isName(current()) && !at(Kind.OPEN_NAME)) {
+                    throw error("Ожидается имя после «" + word + "»");
+                }
+                declare(name(), false, local);
+                scope = new Scope(parent);
+                formalParameters();
+                if (word.equals("macro")) type();
+            } catch (ParseFailure ignored) {
+                if (scope == parent) scope = new Scope(parent);
+                recoverStatement();
             }
-            if (word.equals("macro")) type();
             nestedBody();
-            if (takeWord("onerror")) handler();
+            handlers();
             closeBlock(start, word);
         } finally {
             scope = parent;
         }
     }
 
+    private void formalParameters() {
+        if (!take(Kind.LPAREN) || take(Kind.RPAREN)) return;
+        do {
+            if (at(Kind.COMMA) || at(Kind.RPAREN)) throw error("Ожидается имя формального параметра");
+            declare(name(), false, false);
+            type();
+        } while (take(Kind.COMMA));
+        closeArgumentList("параметров");
+    }
+
     private void control(Token start, String word) {
-        if (word.equals("for")) {
-            if (take(Kind.LPAREN)) {
-                if (!at(Kind.RPAREN)) {
-                    if (takeWord("var")) {
-                        declare(name(), false, false);
-                        type();
-                    } else {
-                        Token variable = name();
-                        recordWrite(variable);
-                    }
-                    for (int count = 0; take(Kind.COMMA); count++) {
-                        if (count == 3) throw error("В «for» допускается до четырёх параметров");
-                        if (!at(Kind.COMMA) && !at(Kind.RPAREN)) expression(1);
-                    }
-                }
-                require(Kind.RPAREN, "Ожидается «)» после параметров «for»");
-            }
-        } else {
-            condition();
+        try {
+            if (word.equals("for")) forHeader();
+            else condition(word);
+        } catch (ParseFailure ignored) {
+            recoverStatement();
         }
         if (word.equals("with")) withDepth++;
         try {
@@ -230,31 +239,73 @@ final class RslAnalysis {
         } finally {
             if (word.equals("with")) withDepth--;
         }
-        if (word.equals("if")) {
-            while (takeWord("elif")) {
-                condition();
-                nestedBody();
-            }
-            if (takeWord("else")) nestedBody();
-        }
+        if (word.equals("if")) ifBranches();
         closeBlock(start, word);
     }
 
-    private void condition() {
-        require(Kind.LPAREN, "Ожидается «(»");
-        expression(1);
-        require(Kind.RPAREN, "Ожидается «)»");
+    private void forHeader() {
+        if (!take(Kind.LPAREN) || take(Kind.RPAREN)) return;
+        if (takeWord("var")) {
+            declare(name(), false, false);
+            type();
+        } else {
+            if (!isName(current()) && !at(Kind.OPEN_NAME)) {
+                throw error("Ожидается переменная цикла «for»");
+            }
+            recordWrite(name());
+        }
+        for (int count = 0; at(Kind.COMMA); count++) {
+            if (count == 3) throw error("В «for» допускается до четырёх параметров");
+            advance();
+            if (!at(Kind.COMMA) && !at(Kind.RPAREN)) expression(1);
+        }
+        closeArgumentList("параметров «for»");
     }
 
-    private void handler() {
-        try {
-            if (take(Kind.LPAREN)) {
-                declare(name(), false, false);
-                require(Kind.RPAREN, "Ожидается «)» после параметра «onerror»");
+    private void ifBranches() {
+        boolean elseSeen = false;
+        while (atWord("elif") || atWord("else")) {
+            Token branch = advance();
+            if (branch.word().equals("else")) {
+                if (elseSeen) report(branch, "В одном «if» допускается только одна ветвь «else»");
+                elseSeen = true;
+            } else {
+                if (elseSeen) report(branch, "Ветвь «elif» должна располагаться перед «else»");
+                try {
+                    condition("elif");
+                } catch (ParseFailure ignored) {
+                    recoverStatement();
+                }
             }
             nestedBody();
-        } catch (ParseFailure ignored) {
-            // The malformed header has already been reported.
+        }
+    }
+
+    private void condition(String word) {
+        require(Kind.LPAREN, "Ожидается «(» после «" + word + "»");
+        if (at(Kind.RPAREN)) {
+            report(advance(), "Ожидается выражение в условии «" + word + "»");
+            return;
+        }
+        expression(1);
+        require(Kind.RPAREN, "Ожидается «)» после условия «" + word + "»");
+    }
+
+    private void handlers() {
+        boolean seen = false;
+        while (atWord("onerror")) {
+            Token handler = advance();
+            if (seen) report(handler, "В одном блоке допускается только один обработчик «onerror»");
+            seen = true;
+            try {
+                if (take(Kind.LPAREN)) {
+                    declare(name(), false, false);
+                    require(Kind.RPAREN, "Ожидается «)» после параметра «onerror»");
+                }
+            } catch (ParseFailure ignored) {
+                recoverStatement();
+            }
+            nestedBody();
         }
     }
 
@@ -322,6 +373,7 @@ final class RslAnalysis {
         int count = 0;
         if (!at(Kind.RPAREN)) {
             do {
+                if (at(Kind.COMMA) || at(Kind.RPAREN)) throw error("Ожидается аргумент");
                 expression(1);
                 count++;
                 while (take(Kind.COLON)) {
@@ -329,8 +381,17 @@ final class RslAnalysis {
                 }
             } while (take(Kind.COMMA));
         }
-        require(Kind.RPAREN, "Ожидается «)» после аргументов");
+        closeArgumentList("аргументов");
         return count;
+    }
+
+    private void closeArgumentList(String context) {
+        if (take(Kind.RPAREN)) return;
+        Kind kind = current().kind();
+        if (isName(current()) || kind == Kind.NUMBER || kind == Kind.LITERAL || kind == Kind.STRING) {
+            throw error("Ожидается «,» между элементами списка " + context + " или «)» в конце");
+        }
+        throw error("Ожидается «)» после " + context);
     }
 
     private Target expression(int minimum) {

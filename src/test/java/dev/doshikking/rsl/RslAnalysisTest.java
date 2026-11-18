@@ -96,6 +96,21 @@ public final class RslAnalysisTest {
     }
 
     private static void diagnostics() {
+        problem("if () end;", ")", "выражение в условии");
+        problem("while true\n  break\nend;", "true", "Ожидается «(» после «while»");
+        problem("if (true) else elif (false) end;", "elif", "перед «else»");
+        problem("if (true) else else end;", "else", "только одна ветвь");
+        problem("for (index, 1, 5, 1, 9) end;", ",", "до четырёх параметров");
+        problem("for (1, 2) end;", "1", "переменная цикла");
+        problem("macro (a) end;", "(", "имя после «macro»");
+        problem("macro run(a,) end;", ")", "имя формального параметра");
+        problem("macro run(a b) end;", "b", "«,» между элементами списка параметров");
+        problem("class Report()\nmacro run()\nreturn 1\nend;", "class", "не закрыт");
+        problem("macro run() onerror onerror end;", "onerror", "только один обработчик");
+        problem("run(1 2);", "2", "«,» между элементами списка аргументов");
+        problem("run(1,);", ")", "Ожидается аргумент");
+        problem("run(1];", "]", "Ожидается «)» после аргументов");
+        problem("run(1));", ")", "Лишняя закрывающая скобка");
         problem("items[0 = 2;", ";", "Ожидается «]»");
         problem("items[] = 2;", "]", "Ожидается выражение");
         problem("const PRICE = 10; price = 20;", "price", "Нельзя изменить");
