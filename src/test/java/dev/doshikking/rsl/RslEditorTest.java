@@ -74,6 +74,47 @@ public final class RslEditorTest extends BasePlatformTestCase {
         assertTrue(descriptions.toString(), descriptions.stream().anyMatch(text -> text.contains("«macro» не закрыт")));
     }
 
+    public void testWarnsAboutAssignmentInConditions() {
+        String source = """
+                if (value = 1)
+                  value = 2;
+                elif (value != 2)
+                  while ((value = 3) and ready)
+                    value = 4
+                  end;
+                elif (value = 5)
+                  value = 6;
+                elif (value == 7)
+                  value = 8;
+                end;
+                """;
+        myFixture.configureByText("conditions.mac", source);
+        var warnings = myFixture.doHighlighting(HighlightSeverity.WARNING);
+        assertEquals(warnings.toString(), 3, warnings.size());
+        assertEquals(source.indexOf("= 1"), warnings.get(0).getStartOffset());
+        assertEquals(source.indexOf("= 3"), warnings.get(1).getStartOffset());
+        assertEquals(source.indexOf("= 5"), warnings.get(2).getStartOffset());
+        for (var warning : warnings) {
+            assertEquals(HighlightSeverity.WARNING, warning.getSeverity());
+            assertEquals(warning.getStartOffset() + 1, warning.getEndOffset());
+            assertTrue(warning.getDescription().contains("«==»"));
+        }
+    }
+
+    public void testWarnsAboutMissingSemicolonAtEndOfIfBranch() {
+        String source = "if(Type != null)\u2028     javaObj.setType(Type)\u2028end;";
+        myFixture.configureByText("branch.mac", source);
+        var warnings = myFixture.doHighlighting(HighlightSeverity.WARNING);
+        assertEquals(warnings.toString(), 1, warnings.size());
+        var warning = warnings.getFirst();
+        assertEquals(HighlightSeverity.WARNING, warning.getSeverity());
+        assertEquals(source.lastIndexOf(')'), warning.getStartOffset());
+        assertEquals("Добавьте «;» в конце инструкции в ветке «if»", warning.getDescription());
+
+        myFixture.configureByText("terminated.mac", "if (Type != null)\n javaObj.setType(Type);\nelse\nend;");
+        assertEmpty(myFixture.doHighlighting(HighlightSeverity.WARNING));
+    }
+
     public void testIndexedAssignment() {
         myFixture.configureByText("indexed.mac",
                 "supplierBillID[supplierBillID.size] = javaObj.supplierBillID.get(i);");

@@ -11,7 +11,11 @@ import java.util.Map;
 import java.util.Set;
 
 final class RslAnalysis {
-    record Problem(int start, int end, String message) {}
+    record Problem(int start, int end, String message, boolean warning) {
+        Problem(int start, int end, String message) {
+            this(start, end, message, false);
+        }
+    }
     record Result(List<Problem> problems, Set<Integer> declarations, Map<Integer, Integer> references) {}
     private record Symbol(Token declaration, boolean constant, boolean local) {}
     private record Scope(Scope parent, Map<String, Symbol> symbols) {
@@ -41,6 +45,7 @@ final class RslAnalysis {
     private int position;
     private int blockDepth;
     private int expressionDepth;
+    private boolean checkingCondition;
     private int withDepth;
 
     private RslAnalysis(CharSequence source) {
@@ -75,12 +80,12 @@ final class RslAnalysis {
 
     static Result inspect(CharSequence source) {
         var analysis = new RslAnalysis(source);
-        analysis.body();
+        analysis.body(false);
         analysis.handlers();
         while (analysis.atWord("elif") || analysis.atWord("else") || analysis.atWord("onerror")) {
             Token branch = analysis.advance();
             analysis.report(branch, "«" + branch.text() + "» вне подходящего блока");
-            analysis.body();
+            analysis.body(false);
         }
         if (analysis.takeWord("end")) {
             // The interpreter ignores the rest of a module after its optional final END.
@@ -99,7 +104,7 @@ final class RslAnalysis {
         return new Result(List.copyOf(analysis.problems), Set.copyOf(analysis.declarations), Map.copyOf(references));
     }
 
-    private void body() {
+    private void body(boolean ifBranch) {
         while (!at(Kind.EOF) && !blockEnd()) {
             int start = position;
             try {
@@ -110,7 +115,9 @@ final class RslAnalysis {
                     continue;
                 }
                 statement();
-                if (!at(Kind.EOF) && !at(Kind.SEMICOLON) && !blockEnd() && !unmatchedCloser()) {
+                if (ifBranch && (atWord("end") || atWord("else") || atWord("elif"))) {
+                    warn(tokens.get(position - 1), "Добавьте «;» в конце инструкции в ветке «if»");
+                } else if (!at(Kind.EOF) && !at(Kind.SEMICOLON) && !blockEnd() && !unmatchedCloser()) {
                     report(current(), "Ожидается «;» между инструкциями");
                 }
             } catch (ParseFailure ignored) {
@@ -208,7 +215,7 @@ final class RslAnalysis {
                 if (scope == parent) scope = new Scope(parent);
                 recoverStatement();
             }
-            nestedBody();
+            nestedBody(false);
             handlers();
             closeBlock(start, word);
         } finally {
@@ -235,7 +242,7 @@ final class RslAnalysis {
         }
         if (word.equals("with")) withDepth++;
         try {
-            nestedBody();
+            nestedBody(word.equals("if"));
         } finally {
             if (word.equals("with")) withDepth--;
         }
@@ -277,7 +284,7 @@ final class RslAnalysis {
                     recoverStatement();
                 }
             }
-            nestedBody();
+            nestedBody(true);
         }
     }
 
@@ -287,7 +294,12 @@ final class RslAnalysis {
             report(advance(), "Ожидается выражение в условии «" + word + "»");
             return;
         }
-        expression(1);
+        checkingCondition = !word.equals("with");
+        try {
+            expression(1);
+        } finally {
+            checkingCondition = false;
+        }
         require(Kind.RPAREN, "Ожидается «)» после условия «" + word + "»");
     }
 
@@ -305,15 +317,15 @@ final class RslAnalysis {
             } catch (ParseFailure ignored) {
                 recoverStatement();
             }
-            nestedBody();
+            nestedBody(false);
         }
     }
 
-    private void nestedBody() {
+    private void nestedBody(boolean ifBranch) {
         if (blockDepth >= MAX_DEPTH) throw error("Слишком много вложенных блоков");
         blockDepth++;
         try {
-            body();
+            body(ifBranch);
         } finally {
             blockDepth--;
         }
@@ -404,7 +416,12 @@ final class RslAnalysis {
                 Token operator = advance();
                 if (operator.kind() == Kind.ASSIGN) {
                     if (!left.writable) report(operator, "Слева от «=» ожидается переменная или свойство");
-                    else if (left.name != null) recordWrite(left.name);
+                    else {
+                        if (checkingCondition) {
+                            warn(operator, "Присваивание «=» в условии. Для сравнения используйте «==»");
+                        }
+                        if (left.name != null) recordWrite(left.name);
+                    }
                 }
                 expression(precedence == 1 ? precedence : precedence + 1);
                 left = Target.VALUE;
@@ -615,6 +632,10 @@ final class RslAnalysis {
 
     private void report(Token token, String message) {
         if (token.start() < token.end()) problems.add(new Problem(token.start(), token.end(), message));
+    }
+
+    private void warn(Token token, String message) {
+        problems.add(new Problem(token.start(), token.end(), message, true));
     }
 
     private static final class ParseFailure extends RuntimeException {

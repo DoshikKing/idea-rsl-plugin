@@ -38,7 +38,7 @@ public final class RslAnalysisTest {
         clean("""
                 supplierBillID[supplierBillID.size] = javaObj.supplierBillID.get(i);
                 Ob.prop [1] = items[byKey["]"]][0];
-                if (hasItems(items[0])) [ ## ] (items[0]) end;
+                if (hasItems(items[0])) [ ## ] (items[0]); end;
                 macro output [ Text ] end;
                 macro typedOutput():integer [ Text ]; return 1 end;
                 class (Base) Report() [ Text ] end;
@@ -56,11 +56,11 @@ public final class RslAnalysisTest {
                     var limit = 4;
                     for (var i:integer, 1, limit)
                       if (i == 1)
-                        [ Сумма #### ] (arg:r:10)
+                        [ Сумма #### ] (arg:r:10);
                       elif (not false)
-                        continue
+                        continue;
                       else
-                        break
+                        break;
                       end
                     end;
                     while (false) break end;
@@ -116,7 +116,7 @@ public final class RslAnalysisTest {
         problem("const PRICE = 10; price = 20;", "price", "Нельзя изменить");
         problem("const RATE = 10; for (rate, 1, 2) break end;", "rate", "Нельзя изменить");
         problem("var name; macro run(name, NAME) end;", "NAME", "Повторное объявление");
-        problem("var a; if(true) var A end;", "A", "Повторное объявление");
+        problem("var a; if(true) var A; end;", "A", "Повторное объявление");
         problem("const LIMIT:integer;", "LIMIT", "начальное значение");
         problem("1 = 2;", "=", "Слева");
         problem("if (true)\n println(1);", "if", "не закрыт");

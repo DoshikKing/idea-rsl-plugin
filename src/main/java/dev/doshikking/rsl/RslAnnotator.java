@@ -38,9 +38,10 @@ public final class RslAnnotator extends ExternalAnnotator<String, List<RslAnalys
         }
 
         for (RslAnalysis.Problem problem : problems) {
-            var annotation = holder.newAnnotation(HighlightSeverity.ERROR, problem.message())
+            var severity = problem.warning() ? HighlightSeverity.WARNING : HighlightSeverity.ERROR;
+            var annotation = holder.newAnnotation(severity, problem.message())
                     .range(new TextRange(problem.start(), problem.end()));
-            if (attributes != null) annotation.enforcedTextAttributes(attributes);
+            if (!problem.warning() && attributes != null) annotation.enforcedTextAttributes(attributes);
             annotation.create();
         }
     }

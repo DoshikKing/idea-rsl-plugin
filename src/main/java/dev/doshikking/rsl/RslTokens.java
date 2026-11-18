@@ -188,7 +188,7 @@ final class RslTokens {
     }
 
     static boolean newLine(char ch) {
-        return ch == '\n' || ch == '\r';
+        return ch == '\n' || ch == '\r' || ch == '\u2028' || ch == '\u2029';
     }
 
     static boolean hex(char ch) {
