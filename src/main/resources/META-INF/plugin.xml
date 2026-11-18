@@ -1,0 +1,16 @@
+<idea-plugin>
+    <id>dev.doshikking.rsl</id>
+    <name>RSL for RS-Bank</name>
+    <vendor>DoshikKing</vendor>
+    <description>Syntax highlighting and on-the-fly static diagnostics for RS-Bank RSL macro modules.</description>
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <fileType name="RSL" language="RSL" extensions="mac"
+                  implementationClass="dev.doshikking.rsl.RslFileType" fieldName="INSTANCE"/>
+        <lang.parserDefinition language="RSL" implementationClass="dev.doshikking.rsl.RslParserDefinition"/>
+        <lang.syntaxHighlighterFactory language="RSL" implementationClass="dev.doshikking.rsl.RslHighlighterFactory"/>
+        <annotator language="RSL" implementationClass="dev.doshikking.rsl.RslAnnotator"/>
+        <colorSettingsPage implementation="dev.doshikking.rsl.RslColorSettings"/>
+    </extensions>
+</idea-plugin>
