@@ -5,19 +5,21 @@ import dev.doshikking.rsl.RslTokens.Token;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 final class RslAnalysis {
     record Problem(int start, int end, String message) {}
-    private record Symbol(boolean constant, boolean local) {}
+    record Result(List<Problem> problems, Set<Integer> declarations, Map<Integer, Integer> references) {}
+    private record Symbol(Token declaration, boolean constant, boolean local) {}
     private record Scope(Scope parent, Map<String, Symbol> symbols) {
         Scope(Scope parent) {
             this(parent, new HashMap<>());
         }
     }
-    private record Write(Scope scope, Token name) {}
+    private record Use(Scope scope, Token name) {}
     private record Target(boolean writable, Token name) {
         static final Target VALUE = new Target(false, null);
         static final Target MEMBER = new Target(true, null);
@@ -31,7 +33,9 @@ final class RslAnalysis {
 
     private final List<Token> tokens = new ArrayList<>();
     private final List<Problem> problems = new ArrayList<>();
-    private final List<Write> writes = new ArrayList<>();
+    private final Map<Integer, Use> uses = new HashMap<>();
+    private final Set<Integer> writes = new HashSet<>();
+    private final Set<Integer> declarations = new HashSet<>();
     private final Scope module = new Scope(null);
     private Scope scope = module;
     private int position;
@@ -66,6 +70,10 @@ final class RslAnalysis {
     }
 
     static List<Problem> analyze(CharSequence source) {
+        return inspect(source).problems();
+    }
+
+    static Result inspect(CharSequence source) {
         var analysis = new RslAnalysis(source);
         analysis.body();
         if (analysis.takeWord("onerror")) analysis.handler();
@@ -79,12 +87,16 @@ final class RslAnalysis {
             int end = analysis.tokens.get(analysis.position - 1).end();
             analysis.problems.removeIf(problem -> problem.start() >= end);
         }
-        for (Write write : analysis.writes) {
-            if (analysis.isConstant(write)) {
-                analysis.report(write.name, "Нельзя изменить значение константы «" + write.name.text() + "»");
+        Map<Integer, Integer> references = new HashMap<>();
+        for (Use use : analysis.uses.values()) {
+            Symbol symbol = analysis.resolve(use);
+            if (symbol == null) continue;
+            references.put(use.name.start(), symbol.declaration.start());
+            if (symbol.constant && analysis.writes.contains(use.name.start())) {
+                analysis.report(use.name, "Нельзя изменить значение константы «" + use.name.text() + "»");
             }
         }
-        return List.copyOf(analysis.problems);
+        return new Result(List.copyOf(analysis.problems), Set.copyOf(analysis.declarations), Map.copyOf(references));
     }
 
     private void body() {
@@ -93,8 +105,8 @@ final class RslAnalysis {
             try {
                 if (take(Kind.SEMICOLON)) continue;
                 statement();
-                if (!at(Kind.EOF) && !at(Kind.SEMICOLON) && !blockEnd() && !current().lineBreakBefore()) {
-                    throw error("Ожидается «;» между инструкциями");
+                if (!at(Kind.EOF) && !at(Kind.SEMICOLON) && !blockEnd()) {
+                    report(current(), "Ожидается «;» между инструкциями");
                 }
             } catch (ParseFailure ignored) {
                 if (position == start) advance();
@@ -376,7 +388,11 @@ final class RslAnalysis {
                     advance();
                     result = Target.VALUE;
                 } else if (takeWord("this")) result = Target.VALUE;
-                else if (isName(token) || token.kind() == Kind.OPEN_NAME) result = new Target(true, name());
+                else if (isName(token) || token.kind() == Kind.OPEN_NAME) {
+                    Token identifier = name();
+                    recordUse(identifier);
+                    result = new Target(true, identifier);
+                }
                 else throw error("Ожидается выражение");
             }
         }
@@ -462,22 +478,30 @@ final class RslAnalysis {
 
     private void declare(Token name, boolean constant, boolean local) {
         Scope owner = name.kind() == Kind.SPECIAL_NAME ? module : scope;
-        if (owner.symbols.putIfAbsent(name.word(), new Symbol(constant, local)) != null) {
+        declarations.add(name.start());
+        if (owner.symbols.putIfAbsent(name.word(), new Symbol(name, constant, local)) != null) {
             report(name, "Повторное объявление «" + name.text() + "» в этой области видимости");
         }
     }
 
-    private void recordWrite(Token name) {
-        if (withDepth == 0) writes.add(new Write(scope, name));
+    private void recordUse(Token name) {
+        if (withDepth == 0 || name.kind() == Kind.SPECIAL_NAME) {
+            uses.putIfAbsent(name.start(), new Use(scope, name));
+        }
     }
 
-    private boolean isConstant(Write write) {
-        Scope original = write.name.kind() == Kind.SPECIAL_NAME ? module : write.scope;
+    private void recordWrite(Token name) {
+        recordUse(name);
+        writes.add(name.start());
+    }
+
+    private Symbol resolve(Use use) {
+        Scope original = use.name.kind() == Kind.SPECIAL_NAME ? module : use.scope;
         for (Scope candidate = original; candidate != null; candidate = candidate.parent) {
-            Symbol symbol = candidate.symbols.get(write.name.word());
-            if (symbol != null && (!symbol.local || candidate == original)) return symbol.constant;
+            Symbol symbol = candidate.symbols.get(use.name.word());
+            if (symbol != null && (!symbol.local || candidate == original)) return symbol;
         }
-        return false;
+        return null;
     }
 
     private boolean localCall() {

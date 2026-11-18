@@ -11,6 +11,7 @@
         <lang.parserDefinition language="RSL" implementationClass="dev.doshikking.rsl.RslParserDefinition"/>
         <lang.syntaxHighlighterFactory language="RSL" implementationClass="dev.doshikking.rsl.RslHighlighterFactory"/>
         <annotator language="RSL" implementationClass="dev.doshikking.rsl.RslAnnotator"/>
+        <lang.findUsagesProvider language="RSL" implementationClass="dev.doshikking.rsl.RslFindUsagesProvider"/>
         <colorSettingsPage implementation="dev.doshikking.rsl.RslColorSettings"/>
     </extensions>
 </idea-plugin>

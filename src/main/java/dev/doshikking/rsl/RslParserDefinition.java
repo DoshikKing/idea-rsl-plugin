@@ -23,6 +23,7 @@ import java.util.Map;
 
 public final class RslParserDefinition implements ParserDefinition {
     private static final IFileElementType FILE = new IFileElementType(RslFileType.INSTANCE.getLanguage());
+    private static final IElementType IDENTIFIER = new IElementType("IDENTIFIER", RslFileType.INSTANCE.getLanguage());
     static final Map<Kind, IElementType> TYPES = new EnumMap<>(Kind.class);
 
     static {
@@ -35,6 +36,13 @@ public final class RslParserDefinition implements ParserDefinition {
         TYPES.put(Kind.BAD, TokenType.BAD_CHARACTER);
     }
 
+    private static final TokenSet IDENTIFIER_TOKENS =
+            TokenSet.create(TYPES.get(Kind.NAME), TYPES.get(Kind.SPECIAL_NAME), TYPES.get(Kind.TYPE));
+
+    static TokenSet identifiers() {
+        return IDENTIFIER_TOKENS;
+    }
+
     @Override
     public @NotNull Lexer createLexer(Project project) {
         return new RslLexer();
@@ -44,8 +52,13 @@ public final class RslParserDefinition implements ParserDefinition {
     public @NotNull PsiParser createParser(Project project) {
         return (root, builder) -> {
             var file = builder.mark();
-            // ponytail: flat PSI for editor services; add declaration nodes when navigation needs them.
-            while (!builder.eof()) builder.advanceLexer();
+            while (!builder.eof()) {
+                if (identifiers().contains(builder.getTokenType())) {
+                    var identifier = builder.mark();
+                    builder.advanceLexer();
+                    identifier.done(IDENTIFIER);
+                } else builder.advanceLexer();
+            }
             file.done(root);
             return builder.getTreeBuilt();
         };
@@ -68,7 +81,7 @@ public final class RslParserDefinition implements ParserDefinition {
 
     @Override
     public @NotNull PsiElement createElement(ASTNode node) {
-        return new ASTWrapperPsiElement(node);
+        return node.getElementType() == IDENTIFIER ? new RslIdentifier(node) : new ASTWrapperPsiElement(node);
     }
 
     @Override
