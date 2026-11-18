@@ -85,6 +85,7 @@ public final class RslParserDefinition implements ParserDefinition {
         private CharSequence buffer = "";
         private int end;
         private int start;
+        private int state;
         private RslTokens.Match token = new RslTokens.Match(Kind.EOF, 0);
 
         @Override
@@ -92,13 +93,13 @@ public final class RslParserDefinition implements ParserDefinition {
             this.buffer = buffer;
             end = endOffset;
             start = startOffset;
-            token = RslTokens.scan(buffer, start, end);
+            state = initialState;
+            token = RslTokens.scan(buffer, start, end, state);
         }
 
         @Override
         public int getState() {
-            // Multiline comments and forms are single tokens, so each token starts in the default state.
-            return 0;
+            return state;
         }
 
         @Override
@@ -118,8 +119,9 @@ public final class RslParserDefinition implements ParserDefinition {
 
         @Override
         public void advance() {
+            state = RslTokens.nextState(buffer, start, token, state);
             start = token.end();
-            token = RslTokens.scan(buffer, start, end);
+            token = RslTokens.scan(buffer, start, end, state);
         }
 
         @Override

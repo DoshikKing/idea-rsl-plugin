@@ -20,8 +20,10 @@ public final class RslAnalysisTest {
                 [ # /* raw text */ ] ({Параметр x}, "a\\"b");
                 """;
         List<Kind> actual = new ArrayList<>();
+        int state = 0;
         for (int offset = 0; offset < source.length(); ) {
-            var match = RslTokens.scan(source, offset, source.length());
+            var match = RslTokens.scan(source, offset, source.length(), state);
+            state = RslTokens.nextState(source, offset, match, state);
             assert match.end() > offset : match;
             if (match.kind() != Kind.SPACE) actual.add(match.kind());
             offset = match.end();
@@ -33,6 +35,14 @@ public final class RslAnalysisTest {
     }
 
     private static void validModules() {
+        clean("""
+                supplierBillID[supplierBillID.size] = javaObj.supplierBillID.get(i);
+                Ob.prop [1] = items[byKey["]"]][0];
+                if (hasItems(items[0])) [ ## ] (items[0]) end;
+                macro output [ Text ] end;
+                macro typedOutput():integer [ Text ]; return 1 end;
+                class (Base) Report() [ Text ] end;
+                """);
         clean("""
                 import rslx, "report.mac";
                 file f(client) btr key 0 write;
@@ -86,6 +96,8 @@ public final class RslAnalysisTest {
     }
 
     private static void diagnostics() {
+        problem("items[0 = 2;", ";", "Ожидается «]»");
+        problem("items[] = 2;", "]", "Ожидается выражение");
         problem("const PRICE = 10; price = 20;", "price", "Нельзя изменить");
         problem("const RATE = 10; for (rate, 1, 2) break end;", "rate", "Нельзя изменить");
         problem("var name; macro run(name, NAME) end;", "NAME", "Повторное объявление");

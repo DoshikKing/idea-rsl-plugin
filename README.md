@@ -20,7 +20,7 @@
 ./gradlew check buildPlugin
 ```
 
-Команда проверяет лексер и анализатор, запускает тест интеграции с редактором и создаёт пакет `build/distributions/idea-rsl-plugin-0.1.0.zip`. В IDEA установите ZIP через **Settings → Plugins → ⚙ → Install Plugin from Disk**. Для запуска отдельного экземпляра IDE с плагином используйте `./gradlew runIde`.
+Команда проверяет лексер и анализатор, запускает тест интеграции с редактором и создаёт пакет `build/distributions/idea-rsl-plugin-<версия>.zip`. В IDEA установите ZIP через **Settings → Plugins → ⚙ → Install Plugin from Disk**. Для запуска отдельного экземпляра IDE с плагином используйте `./gradlew runIde`.
 
 Если IntelliJ IDEA 2025.1 уже установлена, её SDK можно использовать для сборки через `-PplatformPath=/путь/к/IDE`.
 

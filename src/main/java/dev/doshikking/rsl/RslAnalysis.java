@@ -41,8 +41,10 @@ final class RslAnalysis {
 
     private RslAnalysis(CharSequence source) {
         boolean newLine = false;
+        int state = 0;
         for (int offset = 0; offset < source.length(); ) {
-            var match = RslTokens.scan(source, offset, source.length());
+            var match = RslTokens.scan(source, offset, source.length(), state);
+            state = RslTokens.nextState(source, offset, match, state);
             switch (match.kind()) {
                 case SPACE, LINE_COMMENT, BLOCK_COMMENT, OPEN_COMMENT -> {
                     if (match.kind() == Kind.OPEN_COMMENT) {
@@ -386,6 +388,10 @@ final class RslAnalysis {
                 advance();
                 arguments();
                 // Calls and indexed properties use the same syntax in RSL.
+                result = Target.MEMBER;
+            } else if (take(Kind.LBRACKET)) {
+                expression(1);
+                require(Kind.RBRACKET, "Ожидается «]» после индекса");
                 result = Target.MEMBER;
             } else {
                 return result;

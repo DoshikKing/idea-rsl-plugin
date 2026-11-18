@@ -8,7 +8,7 @@ final class RslTokens {
         SPACE, LINE_COMMENT, BLOCK_COMMENT, OPEN_COMMENT,
         NAME, SPECIAL_NAME, OPEN_NAME, KEYWORD, TYPE, LITERAL,
         STRING, OPEN_STRING, NUMBER, BAD_NUMBER, FORM, OPEN_FORM,
-        LPAREN, RPAREN, COMMA, COLON, SEMICOLON, DOT, ASSIGN, OPERATOR, BAD, EOF
+        LPAREN, RPAREN, LBRACKET, RBRACKET, COMMA, COLON, SEMICOLON, DOT, ASSIGN, OPERATOR, BAD, EOF
     }
 
     private static final Set<String> KEYWORDS = Set.of(
@@ -31,7 +31,7 @@ final class RslTokens {
 
     private RslTokens() {}
 
-    static Match scan(CharSequence text, int start, int end) {
+    static Match scan(CharSequence text, int start, int end, int state) {
         if (start >= end) return new Match(Kind.EOF, end);
         char first = text.charAt(start);
         int next = start + 1;
@@ -68,7 +68,7 @@ final class RslTokens {
             }
             return new Match(Kind.OPEN_STRING, next);
         }
-        if (first == '{' || first == '[') {
+        if (first == '{' || first == '[' && (state & AFTER_VALUE) == 0) {
             char close = first == '{' ? '}' : ']';
             while (next < end && text.charAt(next) != close) next++;
             if (next < end) return new Match(first == '{' ? Kind.SPECIAL_NAME : Kind.FORM, next + 1);
@@ -88,6 +88,8 @@ final class RslTokens {
         return switch (first) {
             case '(' -> new Match(Kind.LPAREN, next);
             case ')' -> new Match(Kind.RPAREN, next);
+            case '[' -> new Match(Kind.LBRACKET, next);
+            case ']' -> new Match(Kind.RBRACKET, next);
             case ',' -> new Match(Kind.COMMA, next);
             case ':' -> new Match(Kind.COLON, next);
             case ';' -> new Match(Kind.SEMICOLON, next);
@@ -97,6 +99,56 @@ final class RslTokens {
             case '=' -> second == '=' ? new Match(Kind.OPERATOR, next + 1) : new Match(Kind.ASSIGN, next);
             case '!' -> second == '=' ? new Match(Kind.OPERATOR, next + 1) : new Match(Kind.BAD, next);
             default -> new Match(Kind.BAD, next);
+        };
+    }
+
+    private static final int AFTER_VALUE = 1;
+    private static final int BEFORE_CONDITION = 2;
+    private static final int BEFORE_DECLARATION_NAME = 4;
+    private static final int AFTER_DECLARATION_NAME = 8;
+    private static final int AFTER_PARAMETERS = 16;
+    private static final int BEFORE_RETURN_TYPE = 32;
+    private static final int HEADER_LEVEL = 64;
+
+    static int nextState(CharSequence text, int start, Match match, int state) {
+        int depth = state & -HEADER_LEVEL;
+        int header = state & (HEADER_LEVEL - 1) & ~AFTER_VALUE;
+        return switch (match.kind()) {
+            case SPACE, LINE_COMMENT, BLOCK_COMMENT, OPEN_COMMENT -> {
+                for (int i = start; i < match.end(); i++) {
+                    if (newLine(text.charAt(i))) yield state & ~AFTER_VALUE;
+                }
+                yield state;
+            }
+            case LPAREN -> {
+                if (depth != 0) yield depth + HEADER_LEVEL | header;
+                yield switch (header) {
+                    case BEFORE_CONDITION -> HEADER_LEVEL;
+                    case BEFORE_DECLARATION_NAME -> HEADER_LEVEL | BEFORE_DECLARATION_NAME;
+                    case AFTER_DECLARATION_NAME -> HEADER_LEVEL | AFTER_PARAMETERS;
+                    default -> 0;
+                };
+            }
+            case RPAREN -> {
+                if (depth == HEADER_LEVEL) yield header;
+                if (depth > HEADER_LEVEL) yield depth - HEADER_LEVEL | header | AFTER_VALUE;
+                yield AFTER_VALUE;
+            }
+            case NAME, SPECIAL_NAME, TYPE -> {
+                if (depth != 0) yield depth | header | AFTER_VALUE;
+                if (header == BEFORE_DECLARATION_NAME) yield AFTER_DECLARATION_NAME;
+                yield header == BEFORE_RETURN_TYPE ? 0 : AFTER_VALUE;
+            }
+            case COLON -> depth == 0 && (header == AFTER_DECLARATION_NAME || header == AFTER_PARAMETERS)
+                    ? BEFORE_RETURN_TYPE : depth | header;
+            case RBRACKET -> depth | header | AFTER_VALUE;
+            case KEYWORD -> switch (text.subSequence(start, match.end()).toString().toLowerCase(Locale.ROOT)) {
+                case "if", "elif", "while", "for", "with", "onerror" -> BEFORE_CONDITION;
+                case "macro", "class" -> BEFORE_DECLARATION_NAME;
+                case "this" -> depth | header | AFTER_VALUE;
+                default -> depth == 0 ? 0 : depth | header;
+            };
+            default -> depth == 0 ? 0 : depth | header;
         };
     }
 

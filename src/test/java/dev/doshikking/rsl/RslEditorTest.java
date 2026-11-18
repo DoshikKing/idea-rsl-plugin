@@ -5,6 +5,12 @@ import com.intellij.openapi.fileTypes.SyntaxHighlighterFactory;
 import com.intellij.testFramework.fixtures.BasePlatformTestCase;
 
 public final class RslEditorTest extends BasePlatformTestCase {
+    public void testIndexedAssignment() {
+        myFixture.configureByText("indexed.mac",
+                "supplierBillID[supplierBillID.size] = javaObj.supplierBillID.get(i);");
+        assertEmpty(myFixture.doHighlighting(HighlightSeverity.ERROR));
+    }
+
     public void testHighlightsAndAnalyzesMacFile() {
         String source = "CoNsT LIMIT = 5;\nlimit = 7;";
         var file = myFixture.configureByText("sample.mac", source);
